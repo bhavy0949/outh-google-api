@@ -1,45 +1,38 @@
-import requests
-from django.conf import settings
-from django.http import JsonResponse
 from django.shortcuts import redirect
-from django.views import View
+from django.http import HttpResponse
+from google_auth_oauthlib.flow import Flow
+from googleapiclient.discovery import build
 
-class GoogleCalendarInitView(View):
-    def get(self, request):
-        # Set the necessary parameters for the OAuth process
-        client_id = settings.GOOGLE_CLIENT_ID
-        redirect_uri = settings.GOOGLE_REDIRECT_URI
-        scope = 'https://www.googleapis.com/auth/calendar'
-        
-        # Redirect the user to the Google authorization endpoint
-        auth_url = f'https://accounts.google.com/o/oauth2/auth?client_id={client_id}&redirect_uri={redirect_uri}&scope={scope}&response_type=code'
-        return redirect(auth_url)
+def GoogleCalendarInitView(request):
+    # Step 1: Prompt user for credentials
+    flow = Flow.from_client_secrets_file(
+        '/Users/bhavy/Downloads/client_secret.json',
+        scopes=['https://www.googleapis.com/auth/calendar.readonly'],
+        redirect_uri='http://localhost:8000/rest/v1/calendar/redirect/'
+    )
+    authorization_url, state = flow.authorization_url(access_type='offline')
+    return redirect(authorization_url)
 
-class GoogleCalendarRedirectView(View):
-    def get(self, request):
-        code = request.GET.get('code')
-        client_id = settings.GOOGLE_CLIENT_ID
-        client_secret = settings.GOOGLE_CLIENT_SECRET
-        redirect_uri = settings.GOOGLE_REDIRECT_URI
-        grant_type = 'authorization_code'
-        token_url = 'https://accounts.google.com/o/oauth2/token'
-        data = {
-            'code': code,
-            'client_id': client_id,
-            'client_secret': client_secret,
-            'redirect_uri': redirect_uri,
-            'grant_type': grant_type
-        }
-        response = requests.post(token_url, data=data)
-        access_token = response.json().get('access_token')
-        
-        # Use the access_token to get the list of events in the user's calendar
-        calendar_url = 'https://www.googleapis.com/calendar/v3/calendars/primary/events'
-        headers = {
-            'Authorization': f'Bearer {access_token}'
-        }
-        events_response = requests.get(calendar_url, headers=headers)
-        events = events_response.json().get('items', [])
-        
-        # Return the list of events in the response
-        return JsonResponse(events, safe=False)        
+def GoogleCalendarRedirectView(request):
+    # Step 2: Handle redirect request
+    code = request.GET.get('code', None)
+    if code:
+        flow = Flow.from_client_secrets_file(
+            '/Users/bhavy/Downloads/client_secret.json',
+            scopes=['https://www.googleapis.com/auth/calendar.readonly'],
+            redirect_uri='http://localhost:8000/rest/v1/calendar/redirect/'
+        )
+        flow.fetch_token(code=code)
+        credentials = flow.credentials
+
+        # Use the credentials to get a list of events from the user's calendar
+        service = build('calendar', 'v3', credentials=credentials)
+        events_result = service.events().list(calendarId='primary').execute()
+        events = events_result.get('items', [])
+
+        # Handle the events as required
+        # ...
+
+        return HttpResponse(events)
+    else:
+        return HttpResponse('Error: Code not provided')
